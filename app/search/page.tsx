@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SearchForm from "@/components/SearchForm";
 import ParkingLotCard from "@/components/ParkingLotCard";
@@ -15,7 +15,7 @@ import { DEFAULT_LIMIT, LIMIT_OPTIONS } from "@/types";
 
 type Status = "idle" | "searching" | "scoring" | "done" | "error";
 
-export default function SearchPage() {
+function SearchContent() {
   const params = useSearchParams();
   const q = params.get("q") ?? "";
   const limitParam = parseInt(params.get("limit") ?? String(DEFAULT_LIMIT), 10);
@@ -232,5 +232,13 @@ export default function SearchPage() {
         </span>
       </footer>
     </div>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense>
+      <SearchContent />
+    </Suspense>
   );
 }
