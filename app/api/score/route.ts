@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  loadScore,
+  saveScore,
+  loadImageBuffer,
+  saveImageBuffer,
+} from "@/lib/storage";
+import type { ParkingLotScore } from "@/types";
 
 if (!process.env.ANTHROPIC_API_KEY) {
-  console.warn("[score] ANTHROPIC_API_KEY not set — scoring will return 500");
+  console.warn("[score] ANTHROPIC_API_KEY not set — scoring will fail");
 }
 
 const anthropic = new Anthropic();
@@ -25,24 +32,32 @@ Respond ONLY with a JSON object — no markdown fences, no extra text:
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { imageUrl } = body as { imageUrl: string };
+  const { imageUrl, lotId } = body as { imageUrl: string; lotId: string };
 
-  if (!imageUrl) {
-    return NextResponse.json({ error: "imageUrl required" }, { status: 400 });
+  if (!imageUrl || !lotId) {
+    return NextResponse.json(
+      { error: "imageUrl and lotId are required" },
+      { status: 400 }
+    );
+  }
+
+  // Return cached score immediately — no external calls.
+  const cached = loadScore(lotId);
+  if (cached) {
+    return NextResponse.json({ ...cached, fromCache: true });
   }
 
   try {
-    // Fetch image and convert to base64
-    const imgRes = await fetch(imageUrl);
-    if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`);
-    const buffer = await imgRes.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString("base64");
-    const rawType = imgRes.headers.get("content-type") ?? "image/jpeg";
-    const mediaType = (
-      ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(rawType)
-        ? rawType
-        : "image/jpeg"
-    ) as "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+    // Use cached image bytes or fetch and store them.
+    let imgBuf = loadImageBuffer(lotId);
+    if (!imgBuf) {
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`);
+      imgBuf = Buffer.from(await imgRes.arrayBuffer());
+      saveImageBuffer(lotId, imgBuf);
+    }
+
+    const base64 = imgBuf.toString("base64");
 
     const msg = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
@@ -53,7 +68,7 @@ export async function POST(request: NextRequest) {
           content: [
             {
               type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64 },
+              source: { type: "base64", media_type: "image/jpeg", data: base64 },
             },
             { type: "text", text: PROMPT },
           ],
@@ -64,10 +79,12 @@ export async function POST(request: NextRequest) {
     const raw = msg.content[0];
     if (raw.type !== "text") throw new Error("Unexpected response type");
 
-    const jsonMatch = raw.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON in response");
+    const match = raw.text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("No JSON in Claude response");
 
-    const score = JSON.parse(jsonMatch[0]);
+    const score = JSON.parse(match[0]) as ParkingLotScore;
+    saveScore(lotId, score);
+
     return NextResponse.json(score);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Scoring failed";

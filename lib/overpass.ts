@@ -29,7 +29,8 @@ export async function geocodeRegion(region: string) {
 export async function findParkingLots(
   lat: number,
   lon: number,
-  radiusMeters = 4000
+  radiusMeters = 4000,
+  maxResults = 50
 ): Promise<OverpassElement[]> {
   const query = `
 [out:json][timeout:30];
@@ -37,7 +38,7 @@ export async function findParkingLots(
   way["amenity"="parking"](around:${radiusMeters},${lat},${lon});
   relation["amenity"="parking"](around:${radiusMeters},${lat},${lon});
 );
-out body center 30 qt;
+out body center ${maxResults} qt;
   `.trim();
 
   const res = await fetch("https://overpass-api.de/api/interpreter", {
