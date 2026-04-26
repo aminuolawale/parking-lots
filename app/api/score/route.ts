@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import {
-  loadScore,
-  saveScore,
-  loadImageBuffer,
-  saveImageBuffer,
-} from "@/lib/storage";
+import { loadScore, saveScore, loadImageBuffer, saveImageBuffer } from "@/lib/storage";
 import type { ParkingLotScore } from "@/types";
 
 if (!process.env.ANTHROPIC_API_KEY) {
@@ -35,26 +30,23 @@ export async function POST(request: NextRequest) {
   const { imageUrl, lotId } = body as { imageUrl: string; lotId: string };
 
   if (!imageUrl || !lotId) {
-    return NextResponse.json(
-      { error: "imageUrl and lotId are required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "imageUrl and lotId are required" }, { status: 400 });
   }
 
   // Return cached score immediately — no external calls.
-  const cached = loadScore(lotId);
+  const cached = await loadScore(lotId);
   if (cached) {
     return NextResponse.json({ ...cached, fromCache: true });
   }
 
   try {
     // Use cached image bytes or fetch and store them.
-    let imgBuf = loadImageBuffer(lotId);
+    let imgBuf = await loadImageBuffer(lotId);
     if (!imgBuf) {
       const imgRes = await fetch(imageUrl);
       if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`);
       imgBuf = Buffer.from(await imgRes.arrayBuffer());
-      saveImageBuffer(lotId, imgBuf);
+      await saveImageBuffer(lotId, imgBuf);
     }
 
     const base64 = imgBuf.toString("base64");
@@ -83,7 +75,7 @@ export async function POST(request: NextRequest) {
     if (!match) throw new Error("No JSON in Claude response");
 
     const score = JSON.parse(match[0]) as ParkingLotScore;
-    saveScore(lotId, score);
+    await saveScore(lotId, score);
 
     return NextResponse.json(score);
   } catch (err) {

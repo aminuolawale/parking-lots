@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { geocodeRegion, findParkingLots } from "@/lib/overpass";
 import { getSatelliteImageUrl } from "@/lib/mapbox";
-import {
-  loadCityCache,
-  saveCityCache,
-  loadScore,
-} from "@/lib/storage";
+import { loadCityCache, saveCityCache, loadScore } from "@/lib/storage";
 import type { ParkingLot, LotsResponse } from "@/types";
 
 export async function GET(request: NextRequest) {
@@ -20,7 +16,7 @@ export async function GET(request: NextRequest) {
   );
 
   try {
-    let cache = loadCityCache(q);
+    let cache = await loadCityCache(q);
     let fromCache = true;
 
     // Fetch from Overpass only when we don't yet have enough stored lots.
@@ -28,7 +24,7 @@ export async function GET(request: NextRequest) {
       fromCache = false;
       const { lat, lon, displayName } = await geocodeRegion(q);
 
-      // Always fetch a generous amount so future requests can be served from cache.
+      // Always fetch generously so future limit increases stay cache-only.
       const fetchCount = Math.max(50, limit);
       const elements = await findParkingLots(lat, lon, 4000, fetchCount);
 
@@ -55,7 +51,7 @@ export async function GET(request: NextRequest) {
         ...freshLots.filter((l) => !existingIds.has(l.id)),
       ];
 
-      saveCityCache(q, {
+      await saveCityCache(q, {
         query: q,
         displayName,
         lat,
@@ -75,12 +71,14 @@ export async function GET(request: NextRequest) {
       };
     }
 
-    // Return the first `limit` lots, each annotated with its cached score (or null).
+    // Return the first `limit` lots annotated with their cached score (or null).
     const slice = cache.lots.slice(0, limit);
-    const lots = slice.map((lot) => ({
-      ...lot,
-      cachedScore: loadScore(lot.id),
-    }));
+    const lots = await Promise.all(
+      slice.map(async (lot) => ({
+        ...lot,
+        cachedScore: await loadScore(lot.id),
+      }))
+    );
 
     const body: LotsResponse = {
       lots,
